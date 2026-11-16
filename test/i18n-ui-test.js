@@ -32,6 +32,10 @@ app.whenReady().then(async () => {
       assert.equal(result.language, next);
       assert.equal(result.title, getCatalog(next).m0390);
       assert.equal(result.untranslated, 0);
+      const priority = await win.webContents.executeJavaScript(`({ value: document.getElementById('setPriorityMode').value, label: document.querySelector('#setPriorityMode option[value="game"]').textContent, note: document.querySelector('[data-i18n="settings.gamePriorityNote"]').textContent })`);
+      assert.equal(priority.value, 'game');
+      assert.equal(priority.label, getCatalog(next)['settings.gamePriority']);
+      assert.equal(priority.note, getCatalog(next)['settings.gamePriorityNote']);
       await new Promise(r => setTimeout(r, 600));
       fs.writeFileSync(path.join(out, `${next}-settings.png`), (await win.webContents.capturePage()).toPNG());
       console.log(next, JSON.stringify(result));

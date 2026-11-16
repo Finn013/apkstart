@@ -646,5 +646,9 @@
   "profile.accelerated": "Hardware acceleration",
   "profile.snapshot": "On-demand snapshots",
   "profile.coldBoot": "Cold boot",
-  "profile.lite": " · Lightweight container"
+  "profile.lite": " · Lightweight container",
+  "settings.gamePriority": "Gaming / low latency · High runtime priority for FPS and rhythm games",
+  "settings.gamePriorityNote": "Gaming mode raises the Android virtual machine’s CPU priority and reduces host polling for lower input and display latency. Other programs may slow down. With no app window open, the container still automatically lowers its priority and parks.",
+  "display.restartingLandscape": "Switching to landscape: restarting Android runtime…",
+  "display.restartingPortrait": "Switching to portrait: restarting Android runtime…"
 }

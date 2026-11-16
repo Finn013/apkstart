@@ -788,6 +788,9 @@ class AdbClient {
       'settings put global transition_animation_scale 0',
       'settings put global animator_duration_scale 0',
       'settings put system screen_off_timeout 2147483647',
+      // 注意：这里不要再写 wm user-rotation / accelerometer_rotation。
+      // 方向由 setOrientation / resetDisplayOverrides 按当前横竖屏状态统一定，
+      // 在这里写死 lock 0 会把横屏方向覆盖回竖屏（画面躺倒）。
     ];
     await this.shell(cmds.join(' ; '), { timeout: 15000 }).catch(() => {});
     return true;
@@ -807,48 +810,40 @@ class AdbClient {
   async keyForward() { return this._key(125); }
 
   /**
-   * 横竖屏切换。
-   * 不用 Ctrl+←（那是模拟器窗口的 Qt 快捷键，需要键盘焦点落在模拟器上，
-   * 而用户点的是 ApkStart 标题栏上的旋转按钮，焦点在网页层，按键根本传不过去），
-   * 直接走模拟器控制台命令，模拟器会自己把 LCD 转过来并调整窗口比例。
-   */
-  /**
-   * 横竖屏切换。
-   * 这里不用模拟器的 Ctrl+←：那条路只把**画面**转 90°，Android 里还是竖屏，
-   * 用户看到的就是整屏横躺的文字（试过 emu rotate、user_rotation、聚焦后发按键，
-   * 都是这个结果）。真正可行的是把 Android 的逻辑分辨率换成目标方向，
-   * 系统会按新方向重新排版，界面始终是正的；模拟器随后跟着换成同样的比例。
-   */
-  /**
-   * 切换「手机竖屏 / 平板横屏」排版。
+   * 切换「手机排版 / 平板排版」。
    *
-   * 正确做法是改**逻辑显示尺寸**（wm size），让安卓以宽屏重新排版：
-   *   - 竖屏 720x1280 @320dpi ≈ 360dp 宽 → 手机排版；
-   *   - 横屏 1280x720 @320dpi ≈ 640dp 宽 → 平板/分栏排版（>=600dp 就是 tablet）。
-   * 同时把 user-rotation 锁回 0，保证画面是正的。
+   * 关键：**绝不改 wm size**。改 wm size 会改变 guest framebuffer 的物理尺寸
+   * （720x1280 -> 1280x720），而嵌入的 Qt 窗口仍是原来的尺寸/方向，于是画面被
+   * 压扁或整体躺倒 90°，鼠标坐标映射也跟着错乱。更糟的是 wm size 覆盖会持久化
+   * 在 /data 里，重启后仍然生效 —— 这就是用户反复看到「黑边 / 未填满 / 点不动」
+   * 的根源。
    *
-   * 以前这里只有 wm size，然后外面再调 agent.rotate 去转模拟器的画面
-   * （等价于 Ctrl+←），结果就是「画面被旋转 90°、应用并没重新排版、还摆不正」。
+   * 现在只改逻辑密度（wm density），framebuffer 始终是 720x1280 正立：
+   *   - 320dpi -> smallestWidth 360dp -> 手机排版
+   *   - 190dpi -> smallestWidth 606dp（>=600dp）-> 平板 / 分栏排版
+   * 尺寸、方向、点击映射全部不变，因此不会躺倒、不会有黑边、点击永远对应。
    */
   async setOrientation(landscape) {
     try {
-      // 无论哪边，先把自动旋转关掉并把用户旋转锁回 0，画面才不会横躺
-      await this.shell('settings put system accelerometer_rotation 0; wm user-rotation lock 0', { timeout: 15000 });
-      if (!landscape) {
-        await this.shell('wm size reset; wm density reset', { timeout: 15000 });
-        return true;
-      }
-      const sizeOut = await this.shell('wm size', { timeout: 10000 });
-      // 注意：重置过之后这里读到的是「Physical size」，用物理尺寸算横屏分辨率
-      const m = /Physical size:\s*(\d+)x(\d+)/.exec(sizeOut);
-      const w = m ? Math.max(Number(m[1]), Number(m[2])) : 1280;
-      const h = m ? Math.min(Number(m[1]), Number(m[2])) : 720;
-      const denOut = await this.shell('wm density', { timeout: 10000 });
-      const dm = /Physical density:\s*(\d+)/.exec(denOut);
-      const dpi = dm ? Number(dm[1]) : 0;
-      const cmds = [`wm size ${w}x${h}`];
-      if (dpi) cmds.push(`wm density ${dpi}`);
-      await this.shell(cmds.join('; '), { timeout: 15000 });
+      // 自动旋转必须关掉（否则传感器会乱转），但 user_rotation 要按目标方向锁：
+      // 物理面板换成 1280x720 之后，只有把 user-rotation 锁成 1（90°），
+      // Android 才会按横屏方向排版 —— 否则它仍按 rotation 0 渲染竖内容，
+      // Qt 贴进横窗口就变成「躺倒 90°」。
+      await this.shell('settings put system accelerometer_rotation 0; wm size reset', { timeout: 15000 });
+      await this.shell(`wm user-rotation lock ${landscape ? 1 : 0}`, { timeout: 15000 });
+      await this.shell(landscape ? 'wm density 190' : 'wm density reset', { timeout: 15000 });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /** 启动时清掉旧版本残留的 wm size / density 覆盖（持久化在 /data，会一直躺倒） */
+  async resetDisplayOverrides(landscape = false) {
+    try {
+      await this.shell('wm size reset; wm density reset', { timeout: 15000 });
+      await this.shell('settings put system accelerometer_rotation 0', { timeout: 15000 });
+      await this.shell(`wm user-rotation lock ${landscape ? 1 : 0}`, { timeout: 15000 });
       return true;
     } catch (_) {
       return false;

@@ -10,6 +10,7 @@ const { BrowserWindow, screen, nativeImage } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { hookOptions } = require('./pointer');
+const store = require('./store');
 
 const TITLEBAR_H = 38;
 /**
@@ -137,14 +138,18 @@ class AppWindow {
       this._push();
     });
 
-    const refit = () => this.scheduleFit();
+    // Electron 最大化时窗口尺寸会分好几步才稳定（OS 动画、DPI 重算），
+    // 单次 40ms 防抖的 fit 常常抓到中间态，结果嵌入画面只占左上角一条，
+    // 右边一大片空白 —— 就是用户截图里「最大化后没填满」。
+    // 改成连续多轮贴合收敛，每轮都按最新的 getContentBounds 重算。
+    const refit = () => this.scheduleFit(6);
     this.win.on('resize', refit);
     this.win.on('move', refit);
     this.win.on('maximize', refit);
     this.win.on('unmaximize', refit);
     this.win.on('restore', () => {
       this.agent.show().catch(() => {});
-      this.scheduleFit();
+      this.scheduleFit(6);
     });
     this.win.on('minimize', () => { this.agent.hide().catch(() => {}); });
     this.win.on('close', () => { this._closing = true; });
@@ -181,7 +186,10 @@ class AppWindow {
 
   _syncHook(active) {
     const opts = this._pointerOptions();
-    const on = !!active && opts.enabled;
+    // 游戏/低延迟模式下完全不装全局鼠标钩子：WH_MOUSE_LL 对桌面每个鼠标事件
+    // 都同步回调，会明显增加指针延迟；FPS 需要的是 Qt 窗口直接收到原始输入。
+    const game = !!(store.getSettings().engine && store.getSettings().engine.priorityMode === 'game');
+    const on = !!active && opts.enabled && !game;
     if (this.agent && typeof this.agent.setHook === 'function') {
       this.agent.setHook(on, opts).catch(() => {});
     }
@@ -263,13 +271,21 @@ class AppWindow {
     };
   }
 
-  scheduleFit() {
+  /**
+   * @param {number} rounds 连续贴合几轮（窗口尺寸变化时每轮都重算最新 bounds）
+   */
+  scheduleFit(rounds = 1) {
     if (!this.isOpen) return;
-    if (this._fitTimer) return;
-    this._fitTimer = setTimeout(() => {
-      this._fitTimer = null;
-      this.fitNow();
-    }, 40);
+    if (this._fitTimer) clearTimeout(this._fitTimer);
+    const run = async (left) => {
+      await this.fitNow().catch(() => {});
+      if (left > 1) {
+        this._fitTimer = setTimeout(() => run(left - 1), 160);
+      } else {
+        this._fitTimer = null;
+      }
+    };
+    this._fitTimer = setTimeout(() => run(Math.max(1, rounds)), 40);
   }
 
   _hwnd() {
@@ -283,45 +299,42 @@ class AppWindow {
   }
 
   /**
-   * 横竖屏切换 = 切换「手机排版 / 平板排版」。
+   * 横竖屏切换（标题栏旋转按钮）= 真正把「物理面板」换成横屏或竖屏。
    *
-   * 关键：**不再去转模拟器的画面**。以前这里先改 wm size、再让 agent 发 Ctrl+←，
-   * 模拟器会把整块画面顺时针/逆时针转 90°，而安卓侧的排版并没有跟着变 ——
-   * 用户看到的就是「画面整个躺倒、还摆不正」。
-   * 现在只做一件事：改逻辑显示尺寸（wm size）+ 锁 user-rotation=0，
-   * 安卓会按新宽度重新排版：360dp 宽是手机，640dp 宽自动进平板/分栏布局。
+   * 为什么必须这么做（踩过的坑）：
+   *   - 改 wm size：只改 Android 逻辑分辨率，模拟器的物理 LCD 仍是竖的，
+   *     Qt 把画面贴在左上角 -> 画面躺倒 90°、只占一条、四周黑边、点击坐标错位；
+   *   - 改 wm density：framebuffer 尺寸不变，画面不会铺满，最大化后右侧一大片空；
+   *   - adb emu rotate：只转画面内容，系统里还是竖屏。
+   * 唯一能得到「正立 + 铺满」横屏的办法，就是把 hw.lcd.width/height 换成
+   * 1280x720 并重启模拟器。重启约 30~60 秒，所以这里只做一次、并给出明确提示。
+   *
+   * @param {(next:boolean)=>Promise<boolean>} [onRestart] 由上层注入的重启实现
    */
-  async rotate() {
+  async rotate(onRestart) {
     if (!this.isOpen) return this.state.landscape;
     const next = !this.state.landscape;
-    if (this.setOrientation) await this.setOrientation(next).catch(() => {});
-    // wm size 会触发全局配置变更，应用要重建一次界面，给足时间再贴窗口
-    await sleep(1200);
-    const area = this._area();
-    const size = AppWindow.sizeFor(area, this.portrait, next);
-    // 最大化状态下 setContentSize 无效，必须先退出最大化再改尺寸，
-    // 否则窗口仍是竖的，横屏画面被塞进竖窗口 = 黑边 / 未填满。
-    const wasMax = this.win.isMaximized();
-    if (wasMax) this.win.unmaximize();
-    this.win.setContentSize(Math.max(320, size.w), Math.max(420, size.h + TITLEBAR_H));
-    const b = this.win.getBounds();
-    this.win.setPosition(
-      Math.round(area.x + (area.w - b.width) / 2),
-      Math.round(area.y + (area.h - b.height) / 2),
-    );
-    // 退出最大化后把窗口抬到最前，别被别的窗口盖住（盖住就是黑屏 / 点不动）
-    try { this.win.show(); this.win.focus(); } catch (_) { /* 窗口可能刚关 */ }
-    this.state.landscape = next;
-    this._push();
-    // wm size 改了 guest framebuffer 尺寸后，Qt 会自己重排好几次；每次都可能把
-    // 嵌入窗口带回旧尺寸，露出黑边 / 画面没填满。连续贴合几轮收敛，之后由
-    // resize 事件的 scheduleFit 兜底。
-    for (let i = 0; i < 6; i += 1) {
-      // eslint-disable-next-line no-await-in-loop
-      await sleep(500);
-      // eslint-disable-next-line no-await-in-loop
-      await this.fitNow();
+    this.setState({ tip: next ? '正在切换到横屏（重启安卓运行时，约 30-60 秒）…' : '正在切回竖屏（重启安卓运行时，约 30-60 秒）…', ready: false });
+    if (typeof onRestart === 'function') {
+      const ok = await onRestart(next).catch(() => false);
+      if (ok) {
+        this.state.landscape = next;
+        this._push();
+        // 面板尺寸变了，窗口宽高比跟着换；贴合几轮收敛
+        for (let i = 0; i < 5; i += 1) {
+          // eslint-disable-next-line no-await-in-loop
+          await sleep(400);
+          // eslint-disable-next-line no-await-in-loop
+          await this.fitNow();
+        }
+        this.setState({ ready: true, tip: '' });
+        return next;
+      }
     }
+    // 没有注入重启实现（或失败）时退回 density 方案，至少能切排版
+    if (this.setOrientation) await this.setOrientation(next).catch(() => {});
+    this.state.landscape = next;
+    this.setState({ ready: true, tip: '' });
     return next;
   }
 

@@ -361,8 +361,9 @@
             <select id="setPriorityMode">
               <option value="balanced" data-i18n="m0593">均衡（推荐）· 运行时让着前台窗口</option>
               <option value="performance" data-i18n="m0594">性能优先 · 运行时与前台同等优先级</option>
+              <option value="game" data-i18n="settings.gamePriority">游戏 / 低延迟 · 运行时高优先级，适合 FPS、音游</option>
             </select>
-            <span class="sub"><span data-i18n="m0595">没有应用窗口时，容器一律自动降到最低优先级停放。</span></span>
+            <span class="sub" data-i18n="settings.gamePriorityNote">游戏模式会让安卓虚拟机保持较高 CPU 优先级并减少宿主侧轮询，输入与画面延迟最低；代价是整机其他程序会变慢。没有应用窗口时容器仍会自动降优先级停放。</span>
           </div>
         </details>
         <div class="field switch-field">

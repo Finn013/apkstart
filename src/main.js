@@ -295,18 +295,71 @@ function refreshPointerMapping() {
   else if (winAgent && winAgent.hooked) winAgent.setHook(false).catch(() => {});
 }
 
+/**
+ * 旋转 = 换物理面板尺寸并重启模拟器。
+ *
+ * 这是唯一能得到「正立 + 铺满」横屏的方式（三种错路都踩过）：
+ *   - wm size：只改逻辑分辨率，物理 LCD 仍是竖的 -> 画面躺倒 90°、只占左上角一条；
+ *   - wm density：framebuffer 尺寸不变 -> 画面不铺满，最大化后右侧一大片空白；
+ *   - adb emu rotate：只转画面内容，系统里还是竖屏。
+ * 只有把 hw.lcd.width/height 换成横屏并重启，Qt 才会按横屏面板开窗口、画面正立铺满。
+ */
+async function restartForOrientation(landscape) {
+  if (!appWin || !appWin.isOpen) return false;
+  const pkg = appWin.pkg;
+  store.saveSettings({ display: { landscape: !!landscape } });
+  send('runtime:log', t(landscape ? 'display.restartingLandscape' : 'display.restartingPortrait'));
+  try {
+    // 先把嵌入窗口摘下来，避免重启过程中在桌面留下黑窗
+    try { await appWin.agent.detach(); } catch (_) { /* ignore */ }
+    await runtime.stop({ graceful: false }).catch(() => {});
+    appLog(`rotate -> landscape=${landscape} restarting runtime`);
+    const rt = await runtime.ensure({
+      onLog: (m) => { send('runtime:log', m); appLog(`  rt ${m}`); },
+    });
+    if (!rt || !rt.ok) return false;
+    await runtime.waitForNetwork({ onLog: () => {}, timeoutMs: 25000 }).catch(() => null);
+    if (pkg) {
+      const app = store.getApp(pkg);
+      if (app) {
+        await rt.client.install(app.apkPath).catch(() => {});
+        await rt.client.startApp(app.package, app.activity, {}).catch(() => {});
+      }
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+    const embedded = await appWin.embed().catch(() => false);
+    if (!embedded) {
+      setTimeout(() => { if (appWin.isOpen) appWin.embed().catch(() => {}); }, 1500);
+      setTimeout(() => { if (appWin.isOpen) appWin.embed().catch(() => {}); }, 4000);
+    }
+    appWin.scheduleFit(6);
+    return true;
+  } catch (e) {
+    appLog(`rotate restart failed: ${e && e.message}`);
+    return false;
+  }
+}
+
 /** 打开（或复用）那个「一个应用一个干净窗口」 */
 function openAppWindow(pkg, tip) {
   const rec = store.getApp(pkg);
+  const land = !!displaySettings().landscape;
+  const p0 = portraitSize();
   appWin.open({
     pkg,
     label: (rec && rec.label) || pkg,
     iconPath: rec && rec.icoPath,
-    portrait: portraitSize(),
+    // 横屏时窗口按横比例开，否则竖窗口里塞横画面会留出大片黑边
+    portrait: land ? { w: p0.h, h: p0.w } : p0,
     fullscreen: displaySettings().mode === 'fullscreen',
   });
   appWin.setIcon(rec && rec.icoPath);
-  appWin.setState({ tip: tip || t('m0374'), ready: false, landscape: false });
+  // 打开时按已保存的方向初始化（物理面板方向在 doctor.lcdFor 里决定）
+  appWin.setState({
+    tip: tip || t('m0374'),
+    ready: false,
+    landscape: !!displaySettings().landscape,
+  });
   currentAppPkg = pkg;
 }
 
@@ -314,16 +367,15 @@ async function toggleDisplayMode() {
   const next = store.saveSettings({
     display: { mode: displaySettings().mode === 'fullscreen' ? 'window' : 'fullscreen' },
   });
+  const full = next.display.mode === 'fullscreen';
   if (appWin && appWin.isOpen) {
-    if (next.display.mode === 'fullscreen') {
-      appWin.win.maximize();
-      // 全屏 = 平板横屏排版：让安卓按宽屏重新排版，而不是只把窗口拉大
-      appWin.setLandscape(true).catch(() => {});
-    } else {
-      appWin.win.unmaximize();
-      appWin.setLandscape(false).catch(() => {});
+    if (full) appWin.win.maximize();
+    else appWin.win.unmaximize();
+    appWin.scheduleFit(6);
+    // 全屏 = 横屏：改物理面板并重启运行时，否则只是把竖画面拉大、右侧一大片空
+    if (!!displaySettings().landscape !== full) {
+      appWin.rotate(restartForOrientation).catch(() => {});
     }
-    appWin.scheduleFit();
   }
   return next.display.mode;
 }
@@ -685,6 +737,11 @@ async function runLaunch(pkg) {
     deviceSize.value = null;
     appWin.refreshPointer();
     await runtime.beginApp(pkg, { onActive: onContainerActive }).catch(() => {});
+    // 游戏/低延迟模式：让窗口代理降频扫描，减少全桌面 EnumWindows 造成的整机卡顿
+    if (winAgent) {
+      const game = store.getSettings().engine?.priorityMode === 'game';
+      winAgent.setPerformanceMode(game).catch(() => {});
+    }
     send('app:launched', { package: pkg, engine: r.engine });
     appLog(`launch ok ${pkg} embedded=${embedded}`);
     return { ok: true, embedded };
@@ -1530,7 +1587,7 @@ function registerIpc() {
     if (appWin && appWin.isOpen) { appWin.close(); return { ok: true }; }
     return { ok: false };
   });
-  ipcMain.handle('shell:rotate', () => appWin.rotate());
+  ipcMain.handle('shell:rotate', () => appWin.rotate(restartForOrientation));
   ipcMain.handle('shell:back', async () => { await runtime.client().keyBack(); });
   ipcMain.handle('shell:forward', async () => { await runtime.client().keyForward(); });
 

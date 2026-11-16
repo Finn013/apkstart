@@ -373,10 +373,10 @@ class EmulatorEngine {
       'hw.camera.back=none',
       'hw.camera.front=none',
       'hw.gps=no',
-      // 方向/加速度传感器必须开：关掉之后安卓拒绝旋转，横竖屏只能靠"转画面"糊弄，
-      // 表现就是画面躺倒、排版不变。开了才能用 wm size 做真正的手机/平板排版切换。
-      'hw.sensors.orientation=yes',
-      'hw.sensors.accelerometer=yes',
+      // 方向/加速度传感器必须关：一旦开启，Android 会按传感器自动旋转，把竖屏
+      // 内容转成横的（画面整体躺倒 90°、文字竖着、四周黑边）。排版切换现在只靠
+      // wm density（改 smallestWidth），不需要也不允许传感器参与。
+      'hw.sensors.orientation=no',
     ].join('\n') + '\n';
     fs.writeFileSync(cfgPath, cfg);
 
@@ -535,8 +535,10 @@ class EmulatorEngine {
     if (headless) {
       args.push('-no-window');
     } else {
-      // 不要模拟器自带的手机外壳；侧边浮动工具栏由窗口代理隐藏。
-      args.push('-no-skin');
+      // 注意：**不能再传 -no-skin**。它会覆盖上面的 -skin，让面板尺寸退回
+      // config.ini 里的旧值 —— 表现就是「设置里切了横屏、实际还是竖屏」，
+      // 以及「画面只占左上角一条」。面板尺寸必须由 -skin 决定。
+      // 设备外壳本来就不会画（ShowDeviceFrame=no + 下面这组 style 参数）。
       // 注意：不能用 -qt-hide-window。它会让模拟器**根本不创建**那个 Qt 窗口，
       // 而窗口代理正是靠 SetParent 把这个窗口嵌进应用窗口来显示画面的 ——
       // 用了它之后 probe 永远找不到窗口，用户看到的是一个全黑的应用窗口。

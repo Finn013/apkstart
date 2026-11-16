@@ -413,6 +413,10 @@ class Installer {
     }
     // 分辨率要在拉起应用之前改，避免 wm size 触发配置变更把刚启动的 Activity 重建
     if (beforeStart) await beforeStart(rt).catch((e) => onLog(`显示适配跳过：${e.message}`));
+    // 清掉旧版本可能残留在 /data 里的 wm size / density 覆盖与自动旋转设置。
+    // 这些覆盖是持久化的，不清理的话每次启动画面都会被转 90° 躺倒、留黑边、
+    // 鼠标点击也无法对应（用户反馈的「旋转黑边 / 未填满 / 点不动同意」）。
+    await rt.client.resetDisplayOverrides(!!(store.getSettings().display || {}).landscape).catch(() => {});
     // 冷启动时顺手做过网络体检：没网就直接说清楚。否则用户只会看到「这个应用一直黑屏」，
     // 完全想不到是虚拟机没网（联网页面拿不到数据就是一块黑底）。
     // 关键修复：Wi-Fi 关联往往比 sys.boot_completed 晚几十秒，红果一进去就拉首页数据，
@@ -498,6 +502,13 @@ class Installer {
           started = false;
         }
         onMark(`am start #${attempt} ${started ? 'ok' : 'fail'}`);
+        // Activity 起来后立刻把方向锁死。放在这里是因为应用启动过程本身会触发
+        // 配置变更（Activity 重建），启动前设的 user-rotation 可能被系统重置回 0 ——
+        // 一旦回 0，横屏面板上的画面就会躺倒 90°（用户看到的就是「转不正」）。
+        if (started) {
+          // eslint-disable-next-line no-await-in-loop
+          await rt.client.setOrientation(!!(store.getSettings().display || {}).landscape).catch(() => {});
+        }
         // eslint-disable-next-line no-await-in-loop
         ok = started ? await staysAlive() : false;
         onMark(`alive #${attempt} ${ok}`);

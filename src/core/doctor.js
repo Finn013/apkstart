@@ -81,9 +81,18 @@ function gpuCandidates(emulatorVersion) {
 }
 
 /** Windows 8.3 短路径：中文用户名 / 中文安装目录时 emulator 会找不到文件 */
-/** 屏幕规格：有硬件加速就上 720x1280（清晰），纯软件模拟降到 540x960（流畅优先） */
-function lcdFor({ accelOk = true, crisp = true } = {}) {
-  return accelOk && crisp ? { w: 720, h: 1280, dpi: 320 } : { w: 540, h: 960, dpi: 240 };
+/**
+ * 屏幕规格。landscape=true 时给出真正的横屏面板（1280x720）。
+ *
+ * 为什么必须改面板尺寸而不是运行时 wm size：模拟器的 LCD 是「物理面板」，
+ * Qt 按面板尺寸开窗口并把画面贴在左上角。运行时改 wm size 只会改 Android 的
+ * 逻辑分辨率，物理面板仍是竖的 —— 结果就是画面躺倒 90°、只占左上角一条、
+ * 四周大片黑边、点击坐标错位。只有把 hw.lcd.width/height 真的换成横屏并重启，
+ * 才能得到「正立 + 铺满」的横屏。
+ */
+function lcdFor({ accelOk = true, crisp = true, landscape = false } = {}) {
+  const base = accelOk && crisp ? { w: 720, h: 1280, dpi: 320 } : { w: 540, h: 960, dpi: 240 };
+  return landscape ? { w: base.h, h: base.w, dpi: base.dpi } : base;
 }
 
 function shortPath(p) {
@@ -157,13 +166,21 @@ function chooseProfile({
   const gpu = overrides.gpuMode && gpus.includes(overrides.gpuMode) ? overrides.gpuMode : gpus[0];
 
   // 渲染分辨率：auto 时按加速状态选（软件模拟降到 540x960 保流畅）
+  // 横屏优先：横屏是由「物理面板尺寸」决定的，必须写进 AVD 并重启才生效，
+  // 所以这里先按 settings.display.landscape 定方向，再叠加 renderSize。
+  const wantLandscape = !!(settings && settings.display && settings.display.landscape);
   const wantLcd = String((settings && settings.engine && settings.engine.renderSize) || 'auto');
   const lcd = /^\d{3,4}x\d{3,4}$/.test(wantLcd)
-    ? { ...lcdFor({ accelOk }), ...(() => {
-      const [w, h] = wantLcd.split('x').map(Number);
-      return { w, h, dpi: w <= 540 ? 240 : (w <= 720 ? 320 : 420) };
-    })() }
-    : lcdFor({ accelOk });
+    ? (() => {
+      const [w0, h0] = wantLcd.split('x').map(Number);
+      // 用户显式分辨率若与当前方向不一致，按方向校正（横屏取长边作宽）
+      const long = Math.max(w0, h0);
+      const short = Math.min(w0, h0);
+      const w = wantLandscape ? long : short;
+      const h = wantLandscape ? short : long;
+      return { w, h, dpi: short <= 540 ? 240 : (short <= 720 ? 320 : 420) };
+    })()
+    : lcdFor({ accelOk, landscape: wantLandscape });
 
   return {
     memoryMB,

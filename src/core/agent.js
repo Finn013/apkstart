@@ -176,6 +176,8 @@ class WinAgent extends EventEmitter {
   async rotate(dir = 'left') { return this.call({ cmd: 'rotate', dir }, 8000); }
   async hide() { return this.call({ cmd: 'hide' }, 3000); }
   async show() { return this.call({ cmd: 'show' }, 3000); }
+  /** 通知代理进入低延迟模式：大幅降低窗口扫描频率，把 CPU 留给安卓渲染 */
+  async setPerformanceMode(on) { return this.call({ cmd: 'perf', on: on ? 1 : 0 }, 3000); }
   async detach() { return this.call({ cmd: 'detach' }, 5000); }
   async probe() { return this.call({ cmd: 'probe' }, 4000); }
   /** 列出当前可见的顶层窗口（用于验证「只有软件界面 / 只有安卓应用窗口」） */

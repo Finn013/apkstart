@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const settings = structuredClone(require('../src/core/store').DEFAULT_SETTINGS);
+settings.engine.priorityMode = 'game';
 const { getCatalog } = require('../src/core/i18n');
 const api = {};
 for (const match of fs.readFileSync(path.join(__dirname, '../src/preload.js'), 'utf8').matchAll(/^  (\w+): /gm)) {

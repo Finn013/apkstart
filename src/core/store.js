@@ -60,7 +60,8 @@ const DEFAULT_SETTINGS = {
     mouseWheelMode: 'smooth', // smooth = 合并后注入一次滑动 | native = 交给 Qt | off = 不处理
     mouseSideButtons: false, // 侧键返回/前进：默认关闭，开启才多装一项映射
     deepTrim: false,         // 深度裁剪系统后台包（Play 商店/向导等），默认不动系统
-    priorityMode: 'balanced', // balanced=让出前台 | performance=qemu 用 Normal 优先级
+    // balanced=让出前台 | performance=qemu Normal | game=qemu High + 低延迟输入
+  priorityMode: 'balanced',
     // 预热：启动 ApkStart 后在后台把安卓环境引导好，第一次点应用几乎不用等。
     // 代价是常驻约 1GB 内存（和 WSA / 应用宝电脑版一样的取舍），可随时关掉。
     prewarm: true,
@@ -117,6 +118,9 @@ const DEFAULT_SETTINGS = {
     density: 0,              // 0 = 按分辨率自动推导
     rememberBounds: true,    // 记住每个应用的窗口位置/大小
     autoFullscreenOnLaunch: false,
+    // 横屏 = 把 AVD 物理面板换成 1280x720 并重启（唯一能得到正立+铺满的方式）。
+    // 持久化在这里，重启 ApkStart 后仍按这个方向开机。
+    landscape: false,
   },
 };
 
@@ -128,7 +132,12 @@ function ensureDirs() {
 
 function readJson(file, fallback) {
   try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
+    let text = fs.readFileSync(file, 'utf8');
+    // 去掉可能的 UTF-8 BOM。带 BOM 时 JSON.parse 会直接抛错，于是整个配置
+    // 静默回落到默认值 —— 用户会看到「设置全丢了」，却完全不知道为什么。
+    // 这个文件会被设置页、同步工具、甚至用户手工编辑，必须容忍 BOM。
+    if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+    return JSON.parse(text);
   } catch (_) {
     return fallback;
   }
@@ -166,7 +175,7 @@ function resourcePreset(mode) {
     case 'save':
       return { resourceMode: 'save', liteMode: true, priorityMode: 'balanced', renderSize: '540x960' };
     case 'smooth':
-      return { resourceMode: 'smooth', liteMode: false, priorityMode: 'performance', renderSize: '720x1280' };
+      return { resourceMode: 'smooth', liteMode: false, priorityMode: 'game', renderSize: '720x1280' };
     case 'balanced':
     default:
       return { resourceMode: 'balanced', liteMode: true, priorityMode: 'balanced', renderSize: 'auto' };

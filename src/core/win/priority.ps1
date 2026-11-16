@@ -10,11 +10,11 @@
 #   normal : user explicitly asked for maximum guest performance
 param(
   [string]$Avd = 'apkstart',
-  [ValidateSet('idle', 'below', 'normal')][string]$Level = 'below'
+  [ValidateSet('idle', 'below', 'normal', 'game')][string]$Level = 'below'
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
-$map = @{ idle = 'Idle'; below = 'BelowNormal'; normal = 'Normal' }
+$map = @{ idle = 'Idle'; below = 'BelowNormal'; normal = 'Normal'; game = 'High' }
 $want = $map[$Level]
 $changed = 0
 

@@ -646,5 +646,9 @@
   "profile.accelerated": "Aceleração de hardware",
   "profile.snapshot": "Snapshots sob demanda",
   "profile.coldBoot": "Inicialização a frio",
-  "profile.lite": " · Contêiner leve"
+  "profile.lite": " · Contêiner leve",
+  "settings.gamePriority": "Jogos / baixa latência · Alta prioridade para jogos de tiro e ritmo",
+  "settings.gamePriorityNote": "O modo de jogos aumenta a prioridade de CPU da máquina virtual Android e reduz as verificações periódicas no computador para diminuir a latência dos comandos e da imagem. Outros programas podem ficar mais lentos. Sem janelas de apps abertas, o contêiner ainda reduz sua prioridade e entra em espera automaticamente.",
+  "display.restartingLandscape": "Alternando para horizontal: reiniciando o ambiente Android…",
+  "display.restartingPortrait": "Alternando para vertical: reiniciando o ambiente Android…"
 }

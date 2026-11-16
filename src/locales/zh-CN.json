@@ -646,5 +646,9 @@
   "profile.accelerated": "硬件加速",
   "profile.snapshot": "按需快照",
   "profile.coldBoot": "冷启动",
-  "profile.lite": " · 轻量容器"
+  "profile.lite": " · 轻量容器",
+  "settings.gamePriority": "游戏 / 低延迟 · 运行时高优先级，适合 FPS、音游",
+  "settings.gamePriorityNote": "游戏模式会让安卓虚拟机保持较高 CPU 优先级并减少宿主侧轮询，输入与画面延迟最低；代价是整机其他程序会变慢。没有应用窗口时容器仍会自动降优先级停放。",
+  "display.restartingLandscape": "切换到横屏：正在重启安卓运行时…",
+  "display.restartingPortrait": "切换回竖屏：正在重启安卓运行时…"
 }

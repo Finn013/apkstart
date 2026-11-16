@@ -116,6 +116,7 @@ public class ApkAgent
     // 与「embed 完成就关掉」的旧逻辑不同，它是**常驻**的 —— sweep 会跳过已经嵌进
     // 我们窗口的那一个窗口，其余一律藏起来（含 ApkStart 退出后回到桌面的那个黑窗）。
     static volatile bool _quiet = true;
+    static volatile bool _perfMode = false;
     static long _bootHideSweep = 0;
     // 兜底超时：万一 embed 没来（用户只是打开了 ApkStart 没点应用），
     // 不能让 120ms 一轮的扫描永远跑下去白烧 CPU。每次真藏到窗口就续期。
@@ -486,6 +487,10 @@ public class ApkAgent
     static void QuietSweep()
     {
         EnsureReparent();
+        // 尺寸自愈：宿主被最大化/缩放后，Electron 的 chrome 层常常没跟着变大，
+        // 画面就只剩左上角一条。这里每轮重贴一次（Fit 内部按宿主客户区重算，
+        // 尺寸没变时 SetWindowPos 基本无开销）。
+        if (_emu != IntPtr.Zero && _host != IntPtr.Zero) Fit(-8, 30, 640, 480, false, 0);
         IntPtr ep = _emu != IntPtr.Zero ? GetParent(_emu) : IntPtr.Zero;
         bool embedded = _emu != IntPtr.Zero && ep != IntPtr.Zero
                      && (ep == _host || ep == _chromeRender);
@@ -579,6 +584,44 @@ public class ApkAgent
                 {
                     SetParent(_emu, cr);
                     // 坐标相对网页层客户区，与宿主一致，沿用传入的 x/y 即可
+                }
+            }
+        }
+        // 以 **宿主窗口客户区** 为准自校正尺寸，而不是信 JS 传来的 w/h、
+        // 也不是信 Chrome 渲染层自己的尺寸。
+        //
+        // 为什么：Electron 最大化后宿主窗口变成 1936x1048，但内部的
+        // Chrome_RenderWidgetHostHWND 仍停在旧尺寸（实测 532x984）—— 而模拟器
+        // 窗口挂在 chrome 层之下，会被父窗口裁剪，于是画面只占左上角一条、
+        // 右边一大片空白（用户截图里「最大化/全屏后没填满」）。
+        // 所以这里先把 chrome 层拉满宿主客户区，再把 emu 设为该客户区大小。
+        if (_host != IntPtr.Zero)
+        {
+            RECT hc;
+            if (GetClientRect(_host, out hc))
+            {
+                int cw = hc.R - hc.L;
+                int chh = hc.B - hc.T;
+                if (cw > 200 && chh > 200)
+                {
+                    if (_chromeRender != IntPtr.Zero)
+                    {
+                        RECT crc;
+                        if (GetWindowRect(_chromeRender, out crc))
+                        {
+                            if ((crc.R - crc.L) != cw || (crc.B - crc.T) != chh)
+                            {
+                                SetWindowPos(_chromeRender, IntPtr.Zero, 0, 0, cw, chh,
+                                    SWP_NOZORDER | SWP_NOACTIVATE);
+                            }
+                        }
+                    }
+                    // x/y 保持 -8 的溢出（把 Qt 的 8px 灰边推出可视区），
+                    // 宽高按客户区 + 2*8；标题栏 38px 由宿主自绘盖住。
+                    x = -8;
+                    y = 38 - 8;
+                    w = cw + 16;
+                    h = (chh - 38) + 16;
                 }
             }
         }
@@ -946,10 +989,14 @@ public class ApkAgent
             }
             if (_embedAt != 0 && now - _embedAt >= 8000) _embedAt = 0;
 
-            // 常驻压制：模拟器主窗 / 工具栏 / qemu·netsimd 控制台黑窗，一律不允许露面。
-            // 前 90 秒 120ms 一轮（开机阶段窗口是「刚创建就可见」，慢了就会闪一下），
-            // 之后放慢到 400ms —— 仍然能兜住「ApkStart 退出后窗口被重挂到桌面」这类情况。
-            long sweepGap = (now - _bootHideStart < 90000) ? 120 : 400;
+            // 常驻压制：模拟器主窗 / 工具栏 / qemu·netsimd 控制台黑窗。
+            // 每轮要枚举全桌面窗口若干次，开销不小 —— 之前 120ms 一轮持续 90 秒，
+            // 会明显拖慢整机（用户反馈「整个系统卡顿」）。实际上窗口已经嵌入后
+            // 根本不需要这么频繁：开机前 10 秒 250ms 抓闪窗，之后 1500ms 兜底即可。
+            // game 模式（_perfMode）下进一步降到 3000ms，把 CPU 全留给安卓渲染。
+            long sweepGap;
+            if (_perfMode) sweepGap = (now - _bootHideStart < 10000) ? 300 : 3000;
+            else sweepGap = (now - _bootHideStart < 10000) ? 250 : 1500;
             if (_quiet && now - _bootHideSweep > sweepGap)
             {
                 _bootHideSweep = now;
@@ -1046,6 +1093,12 @@ public class ApkAgent
                     else if (cmd == "hide")
                     {
                         if (_emu != IntPtr.Zero) ShowWindow(_emu, 0);
+                        Reply(sock, "{\"ok\":true}");
+                    }
+                    else if (cmd == "perf")
+                    {
+                        // JS 侧根据 priorityMode 通知：game 模式下降频窗口扫描
+                        _perfMode = L(line, "on") != 0;
                         Reply(sock, "{\"ok\":true}");
                     }
                     else if (cmd == "show")

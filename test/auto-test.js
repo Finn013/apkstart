@@ -492,6 +492,31 @@ const { AdbClient, friendlyInstallError, friendlyLaunchError } = require('../src
     assert(/SetWindowRgn\(emu, IntPtr\.Zero/.test(src), 'embed 时要清掉旧版本残留的 region');
   });
 
+  // 旋转必须换「物理面板尺寸」并重启，不能只改运行时 wm size / density。
+  //   - wm size：物理 LCD 仍是竖的 -> 画面躺倒 90°、只占左上角一条、点击坐标错位；
+  //   - wm density：framebuffer 尺寸不变 -> 画面不铺满，最大化后右侧一大片空白。
+  await test('横屏必须靠物理面板尺寸（lcdFor landscape），且不得再用运行期 wm size 旋转', () => {
+    const doctor = require('../src/core/doctor');
+    const p = doctor.lcdFor({ accelOk: true, landscape: false });
+    const l = doctor.lcdFor({ accelOk: true, landscape: true });
+    assert(p.w === 720 && p.h === 1280, `竖屏应是 720x1280，实际 ${p.w}x${p.h}`);
+    assert(l.w === 1280 && l.h === 720, `横屏应是 1280x720，实际 ${l.w}x${l.h}`);
+
+    const adb = fs.readFileSync(path.join(__dirname, '..', 'src', 'core', 'adb.js'), 'utf8');
+    const i = adb.indexOf('async setOrientation(');
+    const j = adb.indexOf('async resetDisplayOverrides(');
+    const body = adb.slice(i, j);
+    assert(!/wm size \d/.test(body), 'setOrientation 不得再设置 wm size 覆盖');
+    assert(/wm density 190/.test(body), 'density 只作为退化路径保留');
+  });
+
+  await test('游戏模式必须使用高优先级且关闭全局鼠标钩子', () => {
+    const ps = fs.readFileSync(path.join(__dirname, '..', 'src', 'core', 'win', 'priority.ps1'), 'utf8');
+    assert(/game\s*=\s*'High'/.test(ps), 'game 级别要把 qemu 提到 High');
+    const aw = fs.readFileSync(path.join(__dirname, '..', 'src', 'core', 'appwin.js'), 'utf8');
+    assert(/opts\.enabled && !game/.test(aw), 'game 模式不能装 WH_MOUSE_LL 全局钩子');
+  });
+
   await test('新版 emulator 写的 ram.bin 必须被认作完整快照（否则刚存好的 3GB 会被当空壳删掉）', () => {
     const { EmulatorEngine } = require('../src/core/emulator');
     const emu = new EmulatorEngine(path.join(__dirname, '..'));
@@ -535,11 +560,14 @@ const { AdbClient, friendlyInstallError, friendlyLaunchError } = require('../src
   await test('窗口模式必须真的开窗口（否则应用进程活着但屏幕上看不见）', () => {
     const { EmulatorEngine } = require('../src/core/emulator');
     const emu = new EmulatorEngine(path.join(__dirname, '..'));
-    const win = emu.buildArgs({ headless: false, gpu: 'software' }).join(' ');
+    const win = emu.buildArgs({ headless: false, gpu: 'software', lcd: { w: 720, h: 1280, dpi: 320 } }).join(' ');
     assert(!/-no-window/.test(win), '窗口模式不能再用 -no-window');
-    assert(/-no-skin/.test(win), '窗口模式应去掉手机外壳');
+    // 不能再带 -no-skin：它会覆盖 -skin，让面板尺寸退回 config.ini 里的旧值，
+    // 表现为「设置切了横屏、实际还是竖屏」「画面只占左上角一条」。
+    assert(!/\s-no-skin(\s|$)/.test(win), '窗口模式不能带 -no-skin（会覆盖 -skin）');
+    assert(/-skin \d+x\d+/.test(win), '窗口模式必须用 -skin 明确面板尺寸');
     const headless = emu.buildArgs({ headless: true }).join(' ');
-    assert(/-no-window/.test(headless) && !/-no-skin/.test(headless));
+    assert(/-no-window/.test(headless));
   });
 
   await test('音频：默认开启（不带 -no-audio），关闭后才带 -no-audio', () => {
@@ -1505,7 +1533,7 @@ const { AdbClient, friendlyInstallError, friendlyLaunchError } = require('../src
     const store = require('../src/core/store');
     let s = store.saveSettings({ engine: { resourceMode: 'smooth' } });
     assert(s.engine.liteMode === false, '流畅模式不应限制核数');
-    assert(s.engine.priorityMode === 'performance', '流畅模式应与前台同优先级');
+    assert(s.engine.priorityMode === 'game', '流畅模式应进低延迟游戏优先级（FPS/视频优先）');
     assert(s.engine.renderSize === '720x1280', `分辨率应 720p，实际 ${s.engine.renderSize}`);
     s = store.saveSettings({ engine: { resourceMode: 'save' } });
     assert(s.engine.liteMode === true && s.engine.renderSize === '540x960', '省资源应 540p + 轻量容器');

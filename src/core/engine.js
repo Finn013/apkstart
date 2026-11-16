@@ -912,12 +912,14 @@ class Runtime {
     this.touch();
     const state = container.nextSessionState([...this._activeApps], 'open', pkg);
     const s = this.settings;
-    const perf = s.engine && s.engine.priorityMode === 'performance';
+    const mode = (s.engine && s.engine.priorityMode) || 'balanced';
+    const level = mode === 'game' ? 'game'
+      : mode === 'performance' ? 'normal' : 'below';
 
     if (first) {
       // 有应用要开了：把「空闲存快照」推迟，别在应用启动时抢磁盘
       this.emulator.cancelSnapshotSave();
-      await this.emulator.setPriority(perf ? 'normal' : 'below').catch(() => {});
+      await this.emulator.setPriority(level).catch(() => {});
       try { onActive(true); } catch (_) { /* 轮询启动失败不影响打开应用 */ }
     }
 
@@ -949,7 +951,10 @@ class Runtime {
       const s = this.settings;
       const cmds = container.buildIdleCommands({ deep: !!(s.engine && s.engine.deepTrim) });
       await this.client().shell(cmds.join(' ; '), { timeout: 15000 }).catch(() => '');
-      await this.emulator.setPriority('idle').catch(() => {});
+      // game 模式下即使暂时没有应用窗口也保持高优先级，
+      // 否则下次点开要重新提权、首个输入会有明显延迟。
+      const keepHigh = (s.engine && s.engine.priorityMode) === 'game';
+      await this.emulator.setPriority(keepHigh ? 'normal' : 'idle').catch(() => {});
       // 现在最空闲：把内存状态存成快照，下次开机走恢复而不是冷启动
       this._armSnapshotSave(8000);
       try { onIdle(true); } catch (_) { /* ignore */ }
