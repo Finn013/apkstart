@@ -14,12 +14,15 @@
 LangString ApkStartCreateShortcuts 2052 "正在创建桌面快捷方式…"
 LangString ApkStartCreateShortcuts 1033 "Creating desktop shortcuts…"
 LangString ApkStartCreateShortcuts 1046 "Criando atalhos na área de trabalho…"
+LangString ApkStartCreateShortcuts 1049 "Создание ярлыков на рабочем столе…"
 LangString ApkStartShortcutDescription 2052 "ApkStart — 在电脑上直接运行安卓应用"
 LangString ApkStartShortcutDescription 1033 "ApkStart — Run Android apps on your PC"
 LangString ApkStartShortcutDescription 1046 "ApkStart — Execute apps Android no seu computador"
+LangString ApkStartShortcutDescription 1049 "ApkStart — Запуск Android-приложений на ПК"
 LangString un.ApkStartStopProcesses 2052 "正在结束 ApkStart 残留进程…"
 LangString un.ApkStartStopProcesses 1033 "Stopping remaining ApkStart processes…"
 LangString un.ApkStartStopProcesses 1046 "Encerrando os processos restantes do ApkStart…"
+LangString un.ApkStartStopProcesses 1049 "Завершение оставшихся процессов ApkStart…"
 
 !macro customInstall
   DetailPrint "$(ApkStartCreateShortcuts)"
