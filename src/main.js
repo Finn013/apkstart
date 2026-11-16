@@ -1719,6 +1719,7 @@ if (!gotLock) {
     androidSet = new AndroidSettings(runtime);
 
     updater = new Updater({
+      forkUpdatesDisabled: true,
       currentVersion: app.getVersion(),
       exePath: process.execPath,
       isPackaged: app.isPackaged,

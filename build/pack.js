@@ -81,6 +81,13 @@ for (const item of ['package.json', 'src', 'LICENSE']) {
   if (fs.existsSync(src)) copy(src, path.join(appDir, item));
 }
 
+// Runtime image extraction uses the native LZMA package and its platform binding.
+for (const item of ['lzma', 'lzma-win32-x64-msvc']) {
+  const src = path.join(ROOT, 'node_modules', '@napi-rs', item);
+  if (!fs.existsSync(src)) throw new Error(`Missing required dependency: @napi-rs/${item}`);
+  copy(src, path.join(appDir, 'node_modules', '@napi-rs', item));
+}
+
 // 3. 可选目录
 // engine/ 下只有文档类内容随包分发；大体积运行时组件（emulator、system-images、
 // platform-tools、avd）由应用首次启动时自动从官方源下载，不进安装包。

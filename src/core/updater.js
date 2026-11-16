@@ -36,6 +36,7 @@ class Updater {
    *          onProgress?:Function}} o
    */
   constructor(o) {
+    this.forkUpdatesDisabled = !!o.forkUpdatesDisabled;
     this.current = o.currentVersion || '0.0.0';
     this.exePath = o.exePath;
     this.installDir = path.dirname(o.exePath || '');
@@ -71,6 +72,7 @@ class Updater {
    *        （用户主动点「检查更新」应该拿到最新结果；启动时的静默检查走缓存）
    */
   async check(opts = {}) {
+    if (this.forkUpdatesDisabled) throw new Error('Updates are disabled in this fork to prevent replacing it with the upstream release.');
     const merged = await this.sources.latest({ force: !!opts.force });
     const pick = (re) => merged.assets.find((a) => re.test(String(a.name || '')));
     // 发行版里同时挂着「便携包」和「运行时整包」（ApkStart-runtime-*.zip）。
@@ -124,6 +126,7 @@ class Updater {
    * @returns {Promise<{mode:'zip'|'setup', payload:string, version:string}>}
    */
   async prepare(info) {
+    if (this.forkUpdatesDisabled) throw new Error('Updates are disabled in this fork to prevent replacing it with the upstream release.');
     const it = info || this.latest;
     if (!it || !it.asset) throw new Error('这个版本没有可自动安装的安装包，请到 GitHub 发布页手动下载');
     const dir = path.join(this.updateDir, it.version);
